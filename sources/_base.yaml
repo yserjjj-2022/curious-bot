@@ -1,0 +1,27 @@
+# === Базовый файл конфигурации ===
+# Содержит общие настройки для всех поисковых "срезов".
+# Этот файл не запускается сам по себе, а используется как основа.
+
+# Общее ядро тем, фундаментальных для нашего проекта.
+core_topics:
+  - T10315 # Decision-Making and Behavioral Economics
+  - T10826 # Behavioral and Psychological Studies
+  - T11433 # Emotional Intelligence and Performance
+  - T12787 # Human Behavior and Motivation
+  - T11118 # Evolutionary Psychology and Human Behavior
+  - T11577 # Cognitive Abilities and Testing
+  - T12848 # Psychological Testing and Assessment
+  - T12313 # Emotions and Moral Behavior
+  - T13777 # Cognitive and psychological constructs research
+  - T11705 # Gambling Behavior and Treatments
+  - T14294 # Impulse Buying and Technology Impacts
+
+# Общие типы документов, которые мы ищем.
+document_types:
+  - article
+  - report
+
+# --- НОВОЕ: Фильтр по языку ---
+# Указываем двухбуквенный код языка (ISO 639-1).
+# 'en' для английского. Если оставить пустым или удалить, будет искать по всем языкам.
+# language: 'en'

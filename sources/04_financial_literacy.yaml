@@ -1,0 +1,20 @@
+# === Срез 4: Финансовая грамотность и Образование ===
+enabled: false
+
+fetcher_type: openalex
+fetch_limit: 50
+publication_year: '>2024'
+
+language: 'en'
+
+search_in_fields:
+  default.search: '("financial literacy" OR "financial education") AND (gamification OR "teaching method" OR "cognitive development")'
+
+topics:
+  - T10636 # Innovative Teaching and Learning Methods
+  - T10731 # Educational Games and Gamification
+  - T12993 # Psychology of Development and Education
+  - T14104 # Developmental and Educational Neuropsychology
+  - T14301 # Educational methodologies and cognitive development
+  - T11466 # Innovative Education and Learning Practices
+  - T14087 # Economic, Educational, Environmental and Organizational Development

@@ -1,0 +1,27 @@
+# === Срез 2: Финтех, ИИ и Право ===
+enabled: true
+
+fetcher_type: openalex
+fetch_limit: 50
+publication_year: '>2024'
+
+language: 'en'
+
+# Ищем пересечение технологий (ИИ/Финтех) с поведением/решениями
+search_in_fields:
+  default.search: '("artificial intelligence" OR fintech OR AI OR "machine learning") AND ("behavioral finance" OR "decision making" OR nudge OR bias)'
+
+topics:
+  # Добавляем специализированные темы для этого среза
+  - T13255 # Business, Innovation, and Economy
+  - T11876 # Legal Studies and Policies
+  - T12982 # Legal principles and applications
+  - T11762 # Economic Analysis of Law and Legal Systems
+  - T13364 # Digitalization, Law, and Regulation
+  - T14258 # Legal and Policy Issues
+  - T13138 # Legal and Constitutional Studies
+  - T14234 # Data Privacy and Cybersecurity
+  - T13066 # Information Society and Technology Trends
+  - T13573 # Government, Law, and Information Management
+  - T14268 # Evolving Legal Systems and Governance
+  - T14467 # Public Administration, ICT, and Policy Development

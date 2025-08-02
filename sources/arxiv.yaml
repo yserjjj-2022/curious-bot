@@ -1,0 +1,11 @@
+# === Настройки для источника arXiv ===
+enabled: false # Пока выключен
+
+fetcher_type: arxiv
+
+# Категории arXiv для поиска (например, экономика)
+categories:
+  - econ.GN
+  - q-fin.EC
+
+fetch_limit: 10

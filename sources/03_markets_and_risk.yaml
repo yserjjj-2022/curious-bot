@@ -1,0 +1,22 @@
+# === Срез 3: Финансовые рынки и Управление рисками ===
+enabled: false
+
+fetcher_type: openalex
+fetch_limit: 50
+publication_year: '>2024'
+
+language: 'en'
+
+search_in_fields:
+  default.search: '("risk management" OR "investment strategy" OR volatility) AND (psychology OR bias OR heuristic)'
+
+topics:
+  - T10127 # Banking stability, regulation, efficiency
+  - T10047 # Financial Markets and Investment Strategies
+  - T12394 # Insurance and Financial Risk Management
+  - T11976 # Capital Investment and Risk Analysis
+  - T13074 # Global Financial Regulation and Crises
+  - T11496 # Credit Risk and Financial Regulations
+  - T14154 # finance, banking, and market dynamics
+  - T14317 # Finance, Markets, and Regulation
+  - T14129 # Economic and Business Studies
