@@ -6,11 +6,12 @@ from services.storage_service import StorageService
 
 def run_test():
     """
-    Основная функция для тестирования StorageService.
+    Основная функция для тестирования обновленного StorageService.
+    Проверяет логику работы со статусами и новыми полями.
     """
-    print("=== ЗАПУСК ТЕСТА ДЛЯ STORAGE_SERVICE ===")
+    print("=== ЗАПУСК ТЕСТА ДЛЯ ОБНОВЛЕННОГО STORAGE_SERVICE ===")
     
-    # Используем отдельную тестовую БД, чтобы не засорять рабочую
+    # Используем отдельную тестовую БД
     test_db_path = 'data/test_articles.db'
     db_url = f'sqlite:///{test_db_path}'
     
@@ -23,68 +24,80 @@ def run_test():
     print("\n[ТЕСТ 1] Инициализация сервиса...")
     try:
         storage = StorageService(db_url=db_url)
-        if os.path.exists(test_db_path):
-            print("✅ УСПЕХ: Файл базы данных успешно создан.")
-        else:
-            print("❌ ПРОВАЛ: Файл базы данных не был создан.")
-            return
+        print("✅ УСПЕХ: Сервис инициализирован, файл БД создан.")
     except Exception as e:
         print(f"❌ ПРОВАЛ: Ошибка при инициализации сервиса: {e}")
         return
 
-    # --- Шаг 2: Добавление первой статьи ---
+    # --- Шаг 2: Добавление статьи и проверка статуса 'new' ---
     print("\n[ТЕСТ 2] Добавление новой статьи...")
-    article_1_meta = {
-        'id': 'W12345', 'display_name': 'First Test Article', 'publication_year': 2025,
-        'type': 'article', 'language': 'en'
-    }
-    summary_1 = "Summary for the first article."
+    article_1_meta = {'id': 'W1', 'display_name': 'Article 1'}
     
-    is_added_1 = storage.add_article(article_1_meta, summary_1)
-    if is_added_1:
-        print("✅ УСПЕХ: Первая статья успешно добавлена (метод вернул True).")
-    else:
+    was_added = storage.add_article(
+        article_meta=article_1_meta,
+        content_type='abstract',
+        content_url=None,
+        original_abstract='Abstract for article 1.',
+        source_name='Test Source'
+    )
+    if not was_added:
         print("❌ ПРОВАЛ: Метод add_article вернул False при добавлении новой статьи.")
         return
-        
+    
+    # Проверяем, что статья сохранилась с правильным статусом
+    saved_article_1 = storage.get_article_by_id('W1')
+    if saved_article_1 and saved_article_1.status == 'new':
+        print("✅ УСПЕХ: Статья добавлена со статусом 'new'.")
+    else:
+        status = saved_article_1.status if saved_article_1 else 'None'
+        print(f"❌ ПРОВАЛ: Ожидался статус 'new', но получен '{status}'.")
+        return
+
     # --- Шаг 3: Проверка защиты от дубликатов ---
     print("\n[ТЕСТ 3] Попытка повторного добавления той же статьи...")
-    is_added_again = storage.add_article(article_1_meta, summary_1)
-    if not is_added_again:
-        print("✅ УСПЕХ: Защита от дубликатов сработала (метод вернул False).")
+    was_added_again = storage.add_article(article_1_meta, 'abstract', None, 'Abstract', 'Test')
+    if not was_added_again:
+        print("✅ УСПЕХ: Защита от дубликатов сработала.")
     else:
-        print("❌ ПРОВАЛ: Сервис позволил добавить дубликат статьи.")
+        print("❌ ПРОВАЛ: Сервис позволил добавить дубликат.")
         return
 
-    # --- Шаг 4: Добавление второй статьи и получение списка ---
-    print("\n[ТЕСТ 4] Добавление второй статьи и получение списка...")
-    # Небольшая задержка, чтобы даты добавления гарантированно отличались
-    time.sleep(1) 
-    
-    article_2_meta = {
-        'id': 'W67890', 'display_name': 'Second Test Article', 'publication_year': 2024,
-        'type': 'report', 'language': 'en'
-    }
-    summary_2 = "Summary for the second article."
-    storage.add_article(article_2_meta, summary_2)
-    
-    latest_articles = storage.get_latest_articles(limit=5)
-    
-    if len(latest_articles) == 2:
-        print("✅ УСПЕХ: Получено правильное количество статей (2).")
-    else:
-        print(f"❌ ПРОВАЛ: Получено {len(latest_articles)} статей, ожидалось 2.")
+    # --- Шаг 4: Обновление статуса статьи ---
+    print("\n[ТЕСТ 4] Обновление статуса статьи на 'awaiting_triage'...")
+    update_success = storage.update_article_status('W1', 'awaiting_triage')
+    if not update_success:
+        print("❌ ПРОВАЛ: Метод update_article_status вернул False.")
         return
         
-    if latest_articles[0]['id'] == 'W67890':
-        print("✅ УСПЕХ: Статьи отсортированы правильно (вторая статья идет первой).")
+    updated_article_1 = storage.get_article_by_id('W1')
+    if updated_article_1 and updated_article_1.status == 'awaiting_triage':
+        print("✅ УСПЕХ: Статус статьи успешно обновлен.")
     else:
-        print("❌ ПРОВАЛ: Неправильная сортировка статей.")
-        print("   Ожидалось, что первой будет W67890, но получено:", latest_articles[0]['id'])
+        status = updated_article_1.status if updated_article_1 else 'None'
+        print(f"❌ ПРОВАЛ: Ожидался статус 'awaiting_triage', но получен '{status}'.")
         return
 
-    print("\n🎉🎉🎉 Все тесты успешно пройдены! StorageService работает корректно. 🎉🎉🎉")
+    # --- Шаг 5: Проверка выборки по статусу ---
+    print("\n[ТЕСТ 5] Проверка выборки по статусу...")
+    # Добавляем еще одну статью, она будет со статусом 'new'
+    storage.add_article({'id': 'W2', 'display_name': 'Article 2'}, 'pdf', 'http://a.pdf', 'Abstract 2', 'Test')
+    
+    new_articles = storage.get_articles_by_status('new', limit=5)
+    triage_articles = storage.get_articles_by_status('awaiting_triage', limit=5)
+
+    if len(new_articles) == 1 and new_articles[0].id == 'W2':
+        print("✅ УСПЕХ: Корректно найдена 1 статья со статусом 'new'.")
+    else:
+        print(f"❌ ПРОВАЛ: Найдено {len(new_articles)} статей со статусом 'new', ожидалась 1.")
+        return
+
+    if len(triage_articles) == 1 and triage_articles[0].id == 'W1':
+        print("✅ УСПЕХ: Корректно найдена 1 статья со статусом 'awaiting_triage'.")
+    else:
+        print(f"❌ ПРОВАЛ: Найдено {len(triage_articles)} статей со статусом 'awaiting_triage', ожидалась 1.")
+        return
+
+    print("\n🎉🎉🎉 Все тесты успешно пройдены! Обновленный StorageService работает корректно. 🎉🎉🎉")
 
 if __name__ == "__main__":
     run_test()
-

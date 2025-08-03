@@ -8,7 +8,7 @@ publication_year: '>2024'
 language: 'en'
 
 search_in_fields:
-  default.search: '("financial literacy" OR "financial education") AND (gamification OR "teaching method" OR "cognitive development")'
+  default.search: ("financial literacy" OR "financial education" OR "personal finance" OR "financial capability" OR "financial behavior") AND (gamification OR "teaching method" OR "educational tool" OR "learning intervention")
 
 topics:
   - T10636 # Innovative Teaching and Learning Methods
