@@ -1,5 +1,5 @@
 # === Срез 5: Социально-экономическое развитие и Благополучие ===
-enabled: false
+enabled: true
 
 fetcher_type: openalex
 fetch_limit: 50

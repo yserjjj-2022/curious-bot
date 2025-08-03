@@ -3,4 +3,5 @@ python-telegram-bot[job-queue]
 pyalex
 python-dotenv
 pyyaml
-openpyxl  # Новая зависимость
+openpyxl
+sqlalchemy

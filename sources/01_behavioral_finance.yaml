@@ -1,8 +1,8 @@
 # === Срез 1: Поведенческие финансы (Базовый) ===
-enabled: false
+enabled: true
 
 fetch_limit: 50
-publication_year: '>2023'
+publication_year: '>2024'
 
 language: 'en'
 

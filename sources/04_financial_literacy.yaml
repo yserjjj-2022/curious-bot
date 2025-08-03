@@ -1,5 +1,5 @@
 # === Срез 4: Финансовая грамотность и Образование ===
-enabled: false
+enabled: true
 
 fetcher_type: openalex
 fetch_limit: 50
