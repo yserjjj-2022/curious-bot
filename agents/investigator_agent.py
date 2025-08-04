@@ -1,3 +1,4 @@
+# Файл: agents/investigator_agent.py
 # -*- coding: utf-8 -*-
 
 import sys
@@ -14,44 +15,34 @@ from dotenv import load_dotenv
 dotenv_path = project_root / '.env'
 load_dotenv(dotenv_path=dotenv_path)
 
-# Импортируем ОРИГИНАЛЬНЫЙ playwright
+# --- Используем ТОЛЬКО официальный Playwright ---
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-# Импортируем "патчер" из undetected_playwright
-try:
-    from undetected_playwright import Tarnished
-except ImportError:
-    print("ПРЕДУПРЕЖДЕНИЕ: Не удалось импортировать 'Tarnished'. Режим-невидимка не будет применен.")
-    # Создаем "пустышку", чтобы код не падал
-    class Tarnished:
-        @staticmethod
-        def apply_stealth(context):
-            pass
-
 from bs4 import BeautifulSoup
 from services.storage_service import StorageService
 
 def find_pdf_link_with_browser(page_url: str) -> str | None:
     """
-    Заходит на страницу, используя undetected-playwright по официальной документации,
-    с правильной структурой управления ресурсами.
+    Заходит на страницу, используя стандартный Playwright с аргументами для маскировки.
     """
-    # --- ГЛАВНОЕ ИСПРАВЛЕНИЕ: Вся логика теперь внутри блока `with` ---
     with sync_playwright() as p:
         browser = None
         try:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(locale="en-US")
+            launch_args = [
+                '--disable-blink-features=AutomationControlled',
+                '--start-maximized',
+            ]
+            browser = p.chromium.launch(headless=True, args=launch_args)
             
-            # Применяем патч
-            Tarnished.apply_stealth(context)
-            
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
+            )
             page = context.new_page()
             
             page.goto(page_url, timeout=60000, wait_until='domcontentloaded')
             time.sleep(5) 
             html_content = page.content()
 
-            # Парсинг HTML происходит здесь же, пока у нас есть доступ к ресурсам
             soup = BeautifulSoup(html_content, 'html.parser')
             
             pdf_links = soup.find_all('a', href=re.compile(r'\.pdf', re.I))
@@ -61,7 +52,6 @@ def find_pdf_link_with_browser(page_url: str) -> str | None:
             for link in pdf_links:
                 href = link.get('href')
                 if href and not href.startswith('javascript:'):
-                    # Мы нашли ссылку, можем выходить. `finally` выполнится.
                     return urljoin(page_url, href)
                         
             return None
@@ -69,49 +59,55 @@ def find_pdf_link_with_browser(page_url: str) -> str | None:
             print(f"    -> Ошибка: Страница {page_url} не загрузилась за 60 секунд.")
             return None
         except Exception as e:
-            print(f"    -> Неожиданная ошибка при работе с undetected-playwright: {e}")
+            print(f"    -> Неожиданная ошибка при работе с Playwright: {e}")
             return None
         finally:
-            # Этот блок `finally` выполнится ПЕРЕД тем, как закроется `with`.
-            # Он гарантирует, что браузер будет закрыт, даже если произойдет ошибка.
             if browser:
                 browser.close()
 
 def run_investigation():
     """
-    Основной цикл работы "Агента-Следователя" (финальная, надежная версия).
+    Основной цикл работы "Агента-Следователя", который теперь
+    ПРАВИЛЬНО меняет статус статьи с 'new' на 'investigated'.
     """
-    print("=== ЗАПУСК АГЕНТА-СЛЕДОВАТЕЛЯ (Движок: undetected-playwright, правильная архитектура) ===")
+    print("=== ЗАПУСК АГЕНТА-СЛЕДОВАТЕЛЯ (Финальная, синхронизированная версия) ===")
     storage = StorageService()
     
     articles_to_investigate = storage.get_articles_by_status('new', limit=10)
     upgraded_count = 0
-    print(f"Найдено {len(articles_to_investigate)} статей для расследования...")
+    processed_count = 0
+    print(f"Найдено {len(articles_to_investigate)} новых статей для расследования...")
 
     for i, article in enumerate(articles_to_investigate):
         url_to_check = article.doi
+        new_status = 'investigated'
         
-        if not url_to_check or article.content_type == 'pdf':
-            print(f"[{i+1}/{len(articles_to_investigate)}] Пропускаю: {article.title[:40]}... (Причина: нет DOI или уже PDF)")
-            continue
-
-        print(f"\n[{i+1}/{len(articles_to_investigate)}] Расследую: {article.title[:50]}... (DOI: {url_to_check})")
-        
-        pdf_link = find_pdf_link_with_browser(url_to_check)
-        
-        if pdf_link:
-            print(f"  ✅ НАЙДЕН PDF: {pdf_link}")
-            storage.update_article_content(article.id, 'pdf', pdf_link)
-            upgraded_count += 1
+        if not url_to_check:
+            print(f"[{i+1}/{len(articles_to_investigate)}] Пропускаю: {article.title[:40]}... (Причина: нет DOI)")
+            new_status = 'investigated_no_link'
         else:
-            print("  -> PDF не найден на странице.")
+            print(f"\n[{i+1}/{len(articles_to_investigate)}] Расследую: {article.title[:50]}... (DOI: {url_to_check})")
+            
+            pdf_link = find_pdf_link_with_browser(url_to_check)
+            
+            if pdf_link:
+                print(f"  ✅ НАЙДЕН PDF: {pdf_link}")
+                storage.update_article_content(article.id, 'pdf', pdf_link)
+                upgraded_count += 1
+            else:
+                print("  -> PDF не найден на странице.")
+
+        storage.update_article_status(article.id, new_status)
+        processed_count += 1
+        print(f"   -> Статья {article.id} обработана. Новый статус: '{new_status}'.")
 
         sleep_time = random.uniform(5, 10)
         print(f"   ...пауза на {sleep_time:.1f} секунд...")
         time.sleep(sleep_time)
             
     print(f"\n=== РАССЛЕДОВАНИЕ ЗАВЕРШЕНО ===")
-    print(f"Успешно 'прокачано' до PDF: {upgraded_count} статей.")
+    print(f"Всего обработано статей: {processed_count}")
+    print(f"Из них 'прокачано' до PDF: {upgraded_count}")
 
 if __name__ == "__main__":
     run_investigation()

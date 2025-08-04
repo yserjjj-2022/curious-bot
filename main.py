@@ -1,99 +1,77 @@
 # -*- coding: utf-8 -*-
 
+import os
 import sys
-import time
-import re
-import random
+import yaml
 from pathlib import Path
-from urllib.parse import urljoin
+import json
 
-# --- Надежная загрузка .env и настройка импортов ---
-project_root = Path(__file__).resolve().parent.parent
+# --- Блок инициализации ---
+project_root = Path(__file__).resolve().parent
 sys.path.append(str(project_root))
 from dotenv import load_dotenv
 dotenv_path = project_root / '.env'
 load_dotenv(dotenv_path=dotenv_path)
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-# --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Правильный импорт для современных версий ---
-from playwright_stealth.stealth import stealth_sync
-# ------------------------------------------------------------------
-from bs4 import BeautifulSoup
+# --- Правильные импорты наших сервисов ---
+from services.openalex_fetcher import OpenAlexFetcher
 from services.storage_service import StorageService
 
-def find_pdf_link_with_browser(page_url: str) -> str | None:
-    """
-    Заходит на страницу с помощью "замаскированного" браузера и ищет ссылку на PDF.
-    """
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            
-            # Включаем режим "невидимки"
-            stealth_sync(page)
-            
-            # Увеличиваем таймаут до 60 секунд для "тяжелых" сайтов
-            page.goto(page_url, timeout=60000, wait_until='networkidle')
-            
-            html_content = page.content()
-            browser.close()
-
-        soup = BeautifulSoup(html_content, 'html.parser')
-        
-        pdf_links = soup.find_all('a', href=re.compile(r'\.pdf', re.I))
-        if not pdf_links:
-            # Исправляем DeprecationWarning, используя 'string'
-            pdf_links = soup.find_all('a', string=re.compile(r'.*(pdf|download|full.?text).*', re.I))
-
-        for link in pdf_links:
-            href = link.get('href')
-            if href and not href.startswith('javascript:'):
-                return urljoin(page_url, href)
-                    
-        return None
-    except PlaywrightTimeoutError:
-        print(f"    -> Ошибка: Страница {page_url} не загрузилась за 60 секунд.")
-        return None
-    except Exception as e:
-        print(f"    -> Неожиданная ошибка при работе с Playwright: {e}")
-        return None
-
-def run_investigation():
-    """
-    Основной цикл работы "Агента-Следователя" на движке Playwright в режиме "невидимки".
-    """
-    print("=== ЗАПУСК АГЕНТА-СЛЕДОВАТЕЛЯ (Движок: Playwright-Stealth) ===")
-    storage = StorageService()
+def run_collection_cycle():
+    """Основной цикл работы "Агента-Сборщика"."""
+    print("=== ЗАПУСК ЦИКЛА СБОРА ДАННЫХ (АГЕНТ-СБОРЩИК) ===")
     
-    articles_to_investigate = storage.get_articles_by_status('new', limit=10)
-    upgraded_count = 0
-    print(f"Найдено {len(articles_to_investigate)} статей для расследования...")
+    fetcher = OpenAlexFetcher()
+    storage = StorageService()
+    print("Сервисы Fetcher и Storage инициализированы.")
+    
+    source_files = sorted([f for f in os.listdir('sources') if f.endswith('.yaml')])
+    print(f"Найдено {len(source_files)} файлов-срезов для обработки.")
+    
+    for source_file in source_files:
+        print(f"\n--- Обрабатываю срез: {source_file} (Источник: OpenAlex) ---")
+        try:
+            # Загружаем конфигурацию среза
+            with open(f"sources/{source_file}", 'r', encoding='utf-8') as f:
+                slice_config = yaml.safe_load(f)
 
-    for i, article in enumerate(articles_to_investigate):
-        url_to_check = article.doi
-        
-        if not url_to_check or article.content_type == 'pdf':
-            print(f"[{i+1}/{len(articles_to_investigate)}] Пропускаю: {article.title[:40]}... (Причина: нет DOI или уже PDF)")
-            continue
-
-        print(f"\n[{i+1}/{len(articles_to_investigate)}] Расследую: {article.title[:50]}... (DOI: {url_to_check})")
-        
-        pdf_link = find_pdf_link_with_browser(url_to_check)
-        
-        if pdf_link:
-            print(f"  ✅ НАЙДЕН PDF: {pdf_link}")
-            storage.update_article_content(article.id, 'pdf', pdf_link)
-            upgraded_count += 1
-        else:
-            print("  -> PDF не найден на странице.")
-
-        sleep_time = random.uniform(5, 10)
-        print(f"   ...пауза на {sleep_time:.1f} секунд...")
-        time.sleep(sleep_time)
+            # Получаем "сырые" данные от фетчера
+            raw_articles = fetcher.fetch_articles(slice_config)
             
-    print(f"\n=== РАССЛЕДОВАНИЕ ЗАВЕРШЕНО ===")
-    print(f"Успешно 'прокачано' до PDF: {upgraded_count} статей.")
+            if not raw_articles:
+                print("   -> Для данного среза не найдено новых статей, готовых к добавлению.")
+                continue
 
-if __name__ == "__main__":
-    run_investigation()
+            # --- КЛЮЧЕВОЙ БЛОК: Преобразование данных ---
+            # Мы адаптируем "сырые" данные под нашу модель в базе данных
+            added_count = 0
+            for raw_article in raw_articles:
+                article_data_to_store = {
+                    'id': raw_article.get('id'),
+                    'title': raw_article.get('display_name'),
+                    'source_name': 'OpenAlex',
+                    'status': 'new', # Начальный статус
+                    'content_type': raw_article.get('content_type'),
+                    'content_url': raw_article.get('content_url'),
+                    'doi': raw_article.get('doi'),
+                    'year': raw_article.get('publication_year'),
+                    'type': raw_article.get('type'),
+                    'language': raw_article.get('language'),
+                    'original_abstract': raw_article.get('abstract'),
+                    # Сохраняем все "сырые" метаданные как строку JSON
+                    'full_metadata': json.dumps(raw_article) 
+                }
+                
+                # Используем правильное имя аргумента `article_data`
+                if storage.add_article(article_data=article_data_to_store):
+                    added_count += 1
+            
+            print(f"  ✅ Успешно добавлено {added_count} новых статей в базу.")
+
+        except Exception as e:
+            print(f"❌ Ошибка при обработке файла {source_file}: {e}")
+
+    print("\n=== ЦИКЛ СБОРА ДАННЫХ ЗАВЕРШЕН ===")
+
+if __name__ == '__main__':
+    run_collection_cycle()

@@ -8,4 +8,5 @@ sqlalchemy
 gigachat
 beautifulsoup4
 playwright
-undetected-playwright
+PyMuPDF
+readability-lxml

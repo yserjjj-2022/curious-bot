@@ -1,21 +1,16 @@
-# services/storage_service.py
 # -*- coding: utf-8 -*-
 
 import os
-import json
-from datetime import datetime
-from typing import List, Dict, Optional
+from datetime import datetime, timezone
+from typing import List, Union
 
-from sqlalchemy import create_engine, Column, String, Integer, Text, DateTime
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine, Column, String, Integer, Text, DateTime, BigInteger
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 Base = declarative_base()
 
 class Article(Base):
-    """
-    Обновленная модель данных для статьи. Теперь включает DOI.
-    """
+    """Финальная модель данных для статьи."""
     __tablename__ = 'articles'
 
     id = Column(String, primary_key=True)
@@ -23,64 +18,86 @@ class Article(Base):
     source_name = Column(String)
     
     status = Column(String, default='new', nullable=False)
-    content_type = Column(String, nullable=True) # 'pdf', 'html' или 'abstract'
-    content_url = Column(String, nullable=True) # Ссылка на PDF или HTML-страницу
-    doi = Column(String, nullable=True) # Универсальный идентификатор статьи
+    content_type = Column(String, nullable=True)
+    content_url = Column(String, nullable=True)
+    doi = Column(String, nullable=True)
     
     year = Column(Integer)
     type = Column(String)
     language = Column(String)
-    summary = Column(Text, nullable=True) # Наша финальная, утвержденная выжимка
+    summary = Column(Text, nullable=True)
     original_abstract = Column(Text, nullable=True)
-    full_metadata = Column(Text) 
-    date_added = Column(DateTime, default=datetime.utcnow)
+    full_text = Column(Text, nullable=True)
+    
+    full_metadata = Column(Text)
+    
+    # --- ВОТ ЭТА СТРОКА, КОТОРОЙ НЕ ХВАТАЕТ В ВАШЕМ ФАЙЛЕ ---
+    moderation_message_id = Column(BigInteger, nullable=True)
+    
+    date_added = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
-        return f"<Article(id='{self.id}', doi='{self.doi}', title='{self.title[:20]}...')>"
+        return f"<Article(id='{self.id}', status='{self.status}', title='{self.title[:20]}...')>"
 
 class StorageService:
-    """
-    Сервис для работы с хранилищем данных.
-    Абстрагирует всю логику работы с БД.
-    """
+    """Финальная версия сервиса для работы с хранилищем."""
     def __init__(self, db_url: str = 'sqlite:///data/articles.db'):
-        os.makedirs(os.path.dirname(db_url.replace('sqlite:///', '')), exist_ok=True)
+        db_path = db_url.replace('sqlite:///', '')
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.engine = create_engine(db_url)
-        Base.metadata.create_all(self.engine) # Создает таблицу со всеми колонками, если ее нет
+        Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
-    def add_article(self, article_meta: Dict, content_type: Optional[str], content_url: Optional[str], original_abstract: Optional[str], source_name: str, doi: Optional[str]) -> bool:
-        """
-        Добавляет новую статью в базу со статусом 'new' и DOI.
-        """
+    def get_articles_by_status(self, status: Union[str, List[str]], limit: int = 10) -> List[Article]:
         session = self.Session()
         try:
-            article_id = article_meta.get('id')
-            if not article_id or session.query(Article.id).filter_by(id=article_id).first():
-                return False
+            query = session.query(Article)
+            if isinstance(status, list):
+                query = query.filter(Article.status.in_(status))
+            else:
+                query = query.filter_by(status=status)
+            return query.order_by(Article.date_added.asc()).limit(limit).all()
+        finally:
+            session.close()
 
-            new_article = Article(
-                id=article_id,
-                title=article_meta.get('display_name'),
-                source_name=source_name,
-                status='new', # Все новые статьи получают этот статус
-                content_type=content_type,
-                content_url=content_url,
-                doi=doi, # Сохраняем DOI
-                year=article_meta.get('publication_year'),
-                type=article_meta.get('type'),
-                language=article_meta.get('language'),
-                original_abstract=original_abstract,
-                full_metadata=json.dumps(article_meta, ensure_ascii=False)
-            )
-            session.add(new_article)
-            session.commit()
-            return True
+    def update_moderation_message_id(self, article_id: str, message_id: int) -> bool:
+        session = self.Session()
+        try:
+            article = session.query(Article).filter_by(id=article_id).first()
+            if article:
+                article.moderation_message_id = message_id
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+            
+    # --- Остальные методы, которые должны здесь быть ---
+    def add_article(self, article_data: dict) -> bool:
+        session = self.Session()
+        try:
+            # Преобразуем 'full_metadata' в строку JSON, если это словарь
+            if 'full_metadata' in article_data and isinstance(article_data['full_metadata'], dict):
+                import json
+                article_data['full_metadata'] = json.dumps(article_data['full_metadata'])
+            
+            if not session.query(Article).filter_by(id=article_data['id']).first():
+                new_article = Article(**article_data)
+                session.add(new_article)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+            
+    def get_article_by_id(self, article_id: str) -> Article | None:
+        session = self.Session()
+        try:
+            return session.query(Article).filter_by(id=article_id).first()
         finally:
             session.close()
 
     def update_article_status(self, article_id: str, new_status: str) -> bool:
-        """Изменяет статус конкретной статьи."""
         session = self.Session()
         try:
             article = session.query(Article).filter_by(id=article_id).first()
@@ -92,31 +109,37 @@ class StorageService:
         finally:
             session.close()
 
-    def get_articles_by_status(self, status: str, limit: int = 10) -> List[Article]:
-        """Возвращает список статей с указанным статусом."""
-        session = self.Session()
-        try:
-            return session.query(Article).filter_by(status=status).order_by(Article.date_added.asc()).limit(limit).all()
-        finally:
-            session.close()
-    
-    def get_article_by_id(self, article_id: str) -> Optional[Article]:
-        """Находит и возвращает одну статью по ее ID."""
-        session = self.Session()
-        try:
-            return session.query(Article).filter_by(id=article_id).first()
-        finally:
-            session.close()
-
-    # --- НОВЫЙ МЕТОД ДЛЯ АГЕНТА-СЛЕДОВАТЕЛЯ ---
-    def update_article_content(self, article_id: str, new_content_type: str, new_content_url: str) -> bool:
-        """Обновляет информацию о контенте для конкретной статьи."""
+    def update_article_content(self, article_id: str, content_type: str, content_url: str) -> bool:
         session = self.Session()
         try:
             article = session.query(Article).filter_by(id=article_id).first()
             if article:
-                article.content_type = new_content_type
-                article.content_url = new_content_url
+                article.content_type = content_type
+                article.content_url = content_url
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def update_article_text(self, article_id: str, text: str) -> bool:
+        session = self.Session()
+        try:
+            article = session.query(Article).filter_by(id=article_id).first()
+            if article:
+                article.full_text = text
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def update_article_summary(self, article_id: str, summary: str) -> bool:
+        session = self.Session()
+        try:
+            article = session.query(Article).filter_by(id=article_id).first()
+            if article:
+                article.summary = summary
                 session.commit()
                 return True
             return False
