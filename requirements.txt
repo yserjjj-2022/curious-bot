@@ -6,3 +6,6 @@ pyyaml
 openpyxl
 sqlalchemy
 gigachat
+beautifulsoup4
+playwright
+undetected-playwright
