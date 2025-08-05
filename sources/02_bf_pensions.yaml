@@ -1,0 +1,19 @@
+theme_name: "Сбережения и пенсии"
+language: 'en'
+publication_year: '>2024'
+fetch_limit: 50
+
+document_types:
+  - article
+  - book-chapter
+
+context_keywords:
+  - "behavioral finance"
+  - "behavioral economics"
+  - "financial behavior"
+  - "financial psychology"
+
+aspect_keywords:
+  - "pension"
+  - "retirement savings"
+  - "savings behavior"

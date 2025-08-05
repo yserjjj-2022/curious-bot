@@ -31,7 +31,8 @@ class Article(Base):
     
     full_metadata = Column(Text)
     
-    # --- ВОТ ЭТА СТРОКА, КОТОРОЙ НЕ ХВАТАЕТ В ВАШЕМ ФАЙЛЕ ---
+    theme_name = Column(String, nullable=True)
+ 
     moderation_message_id = Column(BigInteger, nullable=True)
     
     date_added = Column(DateTime, default=lambda: datetime.now(timezone.utc))

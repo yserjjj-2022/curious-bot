@@ -1,10 +1,9 @@
-# Файл: agents/content_extractor_agent.py
 # -*- coding: utf-8 -*-
 
 import sys
 import time
 import requests
-import fitz  # PyMuPDF
+import fitz
 from pathlib import Path
 from readability import Document
 from bs4 import BeautifulSoup
@@ -19,8 +18,9 @@ load_dotenv(dotenv_path=dotenv_path)
 # --- Импорты наших модулей ---
 from playwright.sync_api import sync_playwright
 from services.storage_service import StorageService
-from agents.summary_agent import cleanup_text  # Импортируем функцию очистки
+from agents.summary_agent import cleanup_text
 
+# ... (parse_pdf_from_url и parse_html_from_url остаются без изменений) ...
 def parse_pdf_from_url(pdf_url: str) -> str | None:
     """Скачивает и парсит PDF по прямой ссылке."""
     try:
@@ -52,12 +52,10 @@ def parse_html_from_url(page_url: str, original_abstract: str = None) -> str | N
             html_content = page.content()
             
             doc = Document(html_content)
-            # Сначала берем основной контент, который найдет readability
             extracted_html = doc.summary()
             soup = BeautifulSoup(extracted_html, 'html.parser')
             extracted_text = soup.get_text(separator='\n', strip=True)
 
-            # "Санитарная" проверка: если в извлеченном тексте нет даже аннотации, то это мусор
             if original_abstract and original_abstract[:100] not in extracted_text:
                 print("    -> ВНИМАНИЕ: Извлеченный HTML не содержит аннотации. Считаем его невалидным.")
                 return None
@@ -71,8 +69,8 @@ def parse_html_from_url(page_url: str, original_abstract: str = None) -> str | N
                 browser.close()
 
 def run_extraction_cycle():
-    """Основной цикл работы "Агента-Экстрактора" (трехступенчатая стратегия)."""
-    print("=== ЗАПУСК АГЕНТА-ЭКСТРАКТОРА КОНТЕНТА (Трехступенчатая версия) ===")
+    """Основной цикл работы "Агента-Экстрактора" (с приоритетом для .pdf)."""
+    print("=== ЗАПУСК АГЕНТА-ЭКСТРАКТОРА КОНТЕНТА (Финальная версия с приоритетом) ===")
     storage = StorageService()
     
     while True:
@@ -84,35 +82,32 @@ def run_extraction_cycle():
             time.sleep(60)
             continue
 
-        print(f"Найдено {len(articles_to_process)} статей для обработки.")
-
         for article in articles_to_process:
             print(f"\n-> Обрабатываю статью: {article.title[:50]}...")
-            
             raw_text = None
             source_type = None
 
-            # --- Новая, трехступенчатая стратегия ---
+            # --- Новая, улучшенная стратегия с приоритетом для .pdf ---
             
-            # 1. Попытка скачать PDF по content_url
-            if article.content_type == 'pdf' and article.content_url:
-                print("   Попытка №1: Скачивание PDF по прямой ссылке...")
+            # 1. Приоритетная попытка: Скачивание PDF, если ссылка выглядит как PDF
+            if article.content_url and article.content_url.lower().endswith('.pdf'):
+                print("   Попытка №1 (Приоритетная): Обнаружена прямая ссылка на PDF...")
                 raw_text = parse_pdf_from_url(article.content_url)
-                if raw_text: source_type = 'pdf'
+                if raw_text: source_type = 'direct_pdf'
 
-            # 2. Попытка извлечь HTML со страницы content_url
+            # 2. Попытка извлечь HTML со страницы content_url (если приоритетная не сработала)
             if not raw_text and article.content_url:
                 print(f"   Попытка №2: Извлечение HTML со страницы content_url...")
                 raw_text = parse_html_from_url(article.content_url, article.original_abstract)
                 if raw_text: source_type = 'content_url_html'
 
-            # 3. Попытка извлечь HTML со страницы DOI (если она отличается)
+            # 3. Попытка извлечь HTML со страницы DOI (последний шанс)
             if not raw_text and article.doi and article.doi != article.content_url:
                 print(f"   Попытка №3: Извлечение HTML со страницы DOI...")
                 raw_text = parse_html_from_url(article.doi, article.original_abstract)
                 if raw_text: source_type = 'doi_html'
 
-            # --- Финальное принятие решения ---
+            # --- Финальное принятие решения (логика остается без изменений) ---
             if raw_text:
                 print(f"   Извлечен 'грязный' текст ({len(raw_text)} симв.). Начинаю очистку...")
                 cleaned_text = cleanup_text(raw_text)

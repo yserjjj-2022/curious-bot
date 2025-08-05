@@ -1,4 +1,3 @@
-# services/openalex_fetcher.py
 # -*- coding: utf-8 -*-
 
 import os
@@ -7,12 +6,8 @@ import re
 from typing import List, Dict, Tuple, Optional
 from pyalex import invert_abstract
 
-# --- Конфигурация ---
-from dotenv import load_dotenv
-load_dotenv()
+# --- Конфигурация и вспомогательные функции (остаются без изменений) ---
 pyalex.config.email = os.getenv('OPENALEX_EMAIL', 'user@example.com')
-
-# --- Вспомогательные функции ---
 
 def _normalize_title(title: str) -> str:
     if not title: return ""
@@ -29,12 +24,9 @@ def _is_likely_english(text: str, threshold: float = 0.003) -> bool:
     if not text: return True
     cleaned_text = _clean_title_for_ascii_check(text)
     if not cleaned_text: return True
+    if len(cleaned_text) == 0: return True
     non_ascii_chars = sum(1 for char in cleaned_text if not char.isascii())
     return (non_ascii_chars / len(cleaned_text)) < threshold
-
-def _chunk_list(lst: list, n: int):
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
 
 def _get_best_content_source(work: Dict) -> Tuple[Optional[str], Optional[str]]:
     best_loc = work.get('best_oa_location')
@@ -52,52 +44,68 @@ def _get_best_content_source(work: Dict) -> Tuple[Optional[str], Optional[str]]:
         return 'abstract', None
     return None, None
 
+
 # --- Основной класс ---
 class OpenAlexFetcher:
     def fetch_articles(self, config: Dict) -> List[Dict]:
         all_results_pool = []
         seen_ids = set()
-        total_topics = config.get('topics', [])
         
-        topic_chunks = list(_chunk_list(total_topics, 7))
-        print(f"Разбиваю {len(total_topics)} тем на {len(topic_chunks)} запросов...")
+        try:
+            query = pyalex.Works()
+            
+            # Применяем базовые фильтры
+            if config.get('language'): query = query.filter(language=config['language'])
+            if config.get('publication_year'): query = query.filter(publication_year=config['publication_year'])
+            document_types = config.get('document_types', ['article', 'book-chapter'])
+            if document_types: query = query.filter(type="|".join(document_types))
+            
+            # --- ИСПРАВЛЕННАЯ, ЛОГИЧЕСКИ ВЕРНАЯ ЛОГИКА ПОИСКА ---
+            context_keys = config.get('context_keywords', [])
+            aspect_keys = config.get('aspect_keywords', [])
 
-        for i, chunk in enumerate(topic_chunks):
-            print(f"  -> Выполняю запрос {i+1}/{len(topic_chunks)} для {len(chunk)} тем...")
-            try:
-                query = pyalex.Works()
-                
-                if config.get('search_in_fields'):
-                    for field, term in config.get('search_in_fields').items():
-                        query = query.filter(**{field: term})
-                if config.get('language'): query = query.filter(language=config['language'])
-                if config.get('publication_year'): query = query.filter(publication_year=config['publication_year'])
-                if config.get('document_types'): query = query.filter(type="|".join(config['document_types']))
-                
-                query = query.filter(topics={'id': "|".join(chunk)})
-                query = query.sort(publication_date="desc")
-                
-                select_fields = [
-                    'id', 'display_name', 'publication_year', 'publication_date', 
-                    'type', 'topics', 'language', 'abstract_inverted_index',
-                    'best_oa_location', 'locations', 'doi'
-                ]
-                
-                chunk_results = query.select(select_fields).get(per_page=50)
+            if not context_keys or not aspect_keys:
+                print("   -> ВНИМАНИЕ: В файле отсутствуют context_keywords или aspect_keywords. Поиск невозможен.")
+                return []
 
-                for paper in chunk_results:
-                    if paper.get('id') not in seen_ids:
-                        content_type, content_url = _get_best_content_source(paper)
-                        paper['content_type'] = content_type
-                        paper['content_url'] = content_url
-                        paper['abstract'] = invert_abstract(paper.get('abstract_inverted_index')) if paper.get('abstract_inverted_index') else None
-                        all_results_pool.append(paper)
-                        seen_ids.add(paper.get('id'))
-            except Exception as e:
-                print(f"    ...ошибка при обработке чанка {i+1}: {e}")
+            # Формируем группу для контекста: ("term1" OR "term2")
+            context_search_part = " OR ".join([f'"{phrase}"' for phrase in context_keys])
+            
+            # Формируем группу для аспекта: ("term3" OR "term4")
+            aspect_search_part = " OR ".join([f'"{phrase}"' for phrase in aspect_keys])
+
+            # Собираем финальный запрос: (контекст) AND (аспект)
+            final_search_query = f"({context_search_part}) AND ({aspect_search_part})"
+            
+            # Используем основной метод .search()
+            query = query.search(final_search_query)
+            # ----------------------------------------------------
+
+            query = query.sort(publication_date="desc")
+            
+            select_fields = [
+                'id', 'display_name', 'publication_year', 'publication_date', 
+                'type', 'topics', 'language', 'abstract_inverted_index',
+                'best_oa_location', 'locations', 'doi'
+            ]
+            
+            print(f"  -> Выполняю поиск по запросу: {final_search_query}")
+            all_results = query.select(select_fields).get(per_page=200)
+
+            for paper in all_results:
+                if paper.get('id') not in seen_ids:
+                    content_type, content_url = _get_best_content_source(paper)
+                    paper['content_type'] = content_type
+                    paper['content_url'] = content_url
+                    paper['abstract'] = invert_abstract(paper.get('abstract_inverted_index')) if paper.get('abstract_inverted_index') else None
+                    all_results_pool.append(paper)
+                    seen_ids.add(paper.get('id'))
+        except Exception as e:
+            print(f"    ...ошибка при выполнении запроса: {e}")
         
         print(f"\nВсего получено {len(all_results_pool)} уникальных статей от API. Начинаю финальную обработку...")
 
+        # Финальная фильтрация и сортировка
         all_results_pool.sort(key=lambda x: x.get('publication_date', '1900-01-01'), reverse=True)
         
         clean_articles = []

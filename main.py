@@ -29,11 +29,15 @@ def run_collection_cycle():
     print(f"Найдено {len(source_files)} файлов-срезов для обработки.")
     
     for source_file in source_files:
-        print(f"\n--- Обрабатываю срез: {source_file} (Источник: OpenAlex) ---")
+        print(f"\n--- Обрабатываю срез: {source_file} ---")
         try:
             # Загружаем конфигурацию среза
             with open(f"sources/{source_file}", 'r', encoding='utf-8') as f:
                 slice_config = yaml.safe_load(f)
+
+            # Извлекаем "человеческое" имя темы из файла
+            theme_name_from_file = slice_config.get("theme_name", "Без темы")
+            print(f"Тематический срез: '{theme_name_from_file}'")
 
             # Получаем "сырые" данные от фетчера
             raw_articles = fetcher.fetch_articles(slice_config)
@@ -42,15 +46,14 @@ def run_collection_cycle():
                 print("   -> Для данного среза не найдено новых статей, готовых к добавлению.")
                 continue
 
-            # --- КЛЮЧЕВОЙ БЛОК: Преобразование данных ---
-            # Мы адаптируем "сырые" данные под нашу модель в базе данных
+            # Преобразуем "сырые" данные под нашу модель в базе данных
             added_count = 0
             for raw_article in raw_articles:
                 article_data_to_store = {
                     'id': raw_article.get('id'),
                     'title': raw_article.get('display_name'),
                     'source_name': 'OpenAlex',
-                    'status': 'new', # Начальный статус
+                    'status': 'new',
                     'content_type': raw_article.get('content_type'),
                     'content_url': raw_article.get('content_url'),
                     'doi': raw_article.get('doi'),
@@ -58,7 +61,9 @@ def run_collection_cycle():
                     'type': raw_article.get('type'),
                     'language': raw_article.get('language'),
                     'original_abstract': raw_article.get('abstract'),
-                    # Сохраняем все "сырые" метаданные как строку JSON
+                    # Передаем наш тег (имя темы) в базу
+                    'theme_name': theme_name_from_file,
+                    # Сохраняем все "сырые" метаданные как строку JSON для будущих нужд
                     'full_metadata': json.dumps(raw_article) 
                 }
                 
@@ -66,7 +71,7 @@ def run_collection_cycle():
                 if storage.add_article(article_data=article_data_to_store):
                     added_count += 1
             
-            print(f"  ✅ Успешно добавлено {added_count} новых статей в базу.")
+            print(f"  ✅ Успешно добавлено {added_count} новых статей в базу по теме '{theme_name_from_file}'.")
 
         except Exception as e:
             print(f"❌ Ошибка при обработке файла {source_file}: {e}")

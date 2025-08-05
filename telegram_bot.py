@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import re
 from dotenv import load_dotenv
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -26,7 +27,7 @@ if not all([TELEGRAM_BOT_TOKEN, WORKFLOW_CHANNEL_ID, PUBLISH_CHANNEL_ID]):
 
 storage = StorageService()
 
-# --- Конвейеры (остаются без изменений) ---
+# --- Конвейер №1: Отсев ---
 async def triage_conveyor_job(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Запущен конвейер ОТСЕВА...")
     articles = storage.get_articles_by_status('investigated', limit=5)
@@ -49,6 +50,7 @@ async def triage_conveyor_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Ошибка при отправке статьи на отсев: {e}", exc_info=True)
 
+# --- Конвейер №2: Утверждение ---
 async def review_conveyor_job(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Запущен конвейер УТВЕРЖДЕНИЯ...")
     articles = storage.get_articles_by_status('awaiting_review', limit=5)
@@ -57,9 +59,17 @@ async def review_conveyor_job(context: ContextTypes.DEFAULT_TYPE):
         if not article.moderation_message_id:
             logger.warning(f"У статьи {article.id} нет message_id, пропускаю.")
             continue
-        message_text = (f"<b>[НА УТВЕРЖДЕНИЕ]</b>\n\n"
-                        f"<b>Название:</b> {article.title}\n\n"
-                        f"<b>Саммари:</b>\n{article.summary}\n\n<b>Источник:</b> {article.doi}")
+        
+        # Показываем тему редактору
+        theme_line = f"<b>Тема:</b> {article.theme_name}\n\n" if article.theme_name else ""
+        
+        message_text = (
+            f"<b>[НА УТВЕРЖДЕНИЕ]</b>\n\n"
+            f"{theme_line}"
+            f"<b>Название:</b> {article.title}\n\n"
+            f"<b>Саммари:</b>\n{article.summary}\n\n"
+            f"<b>Источник:</b> {article.doi}"
+        )
         keyboard = [[
             InlineKeyboardButton("🚀 Опубликовать", callback_data=f"publish_approve_{article.id}"),
             InlineKeyboardButton("🗑️ В корзину", callback_data=f"publish_reject_{article.id}"),
@@ -75,7 +85,7 @@ async def review_conveyor_job(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Ошибка при отправке статьи на утверждение: {e}", exc_info=True)
 
-# --- Обработчик всех кнопок (финальная, исправленная версия) ---
+# --- Обработчик всех кнопок ---
 async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -84,7 +94,6 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         parts = query.data.split('_')
         prefix, action, article_id = parts[0], parts[1], "_".join(parts[2:])
 
-        # --- ИСПРАВЛЕНИЕ: Используем правильный атрибут text_html ---
         original_message_html = query.message.text_html
 
         def get_title_from_message(message_html: str) -> str:
@@ -97,6 +106,7 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         if prefix == "triage":
             if action == "accept":
                 article = storage.get_article_by_id(article_id)
+                if not article: return
                 next_status = 'awaiting_parsing' if article.content_type == 'pdf' else 'awaiting_abstract_summary'
                 storage.update_article_status(article.id, next_status)
                 await query.edit_message_text(text=f"✅ <b>ПРИНЯТО.</b>\nСтатья отправлена на этап: `{next_status}`\n\n{original_message_html}", parse_mode='HTML', reply_markup=None)
@@ -108,12 +118,24 @@ async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         elif prefix == "publish":
             if action == "approve":
                 article = storage.get_article_by_id(article_id)
-                final_post = (f"<b>{article.title}</b>\n\n{article.summary}\n\n<a href='{article.doi}'>Источник</a>")
+                if not article: return
+
+                # Формируем строку с хэштегом
+                tags_line = ""
+                if article.theme_name:
+                    hashtag = f"#{re.sub(r'[^a-zA-Z0-9а-яА-Я_]', '', article.theme_name.replace(' ', '_'))}"
+                    tags_line = f"{hashtag}\n\n"
+
+                final_post = (f"{tags_line}"
+                              f"<b>{article.title}</b>\n\n"
+                              f"{article.summary}\n\n"
+                              f"<a href='{article.doi}'>Источник</a>")
+                
                 await context.bot.send_message(
                     chat_id=PUBLISH_CHANNEL_ID, text=final_post, parse_mode='HTML',
                     disable_web_page_preview=False
                 )
-                storage.update_article_status(article_id, 'published')
+                storage.update_article_status(article.id, 'published')
                 await query.edit_message_text(text=f"🚀 <b>ОПУБЛИКОВАНО</b>\n\n{original_message_html}", parse_mode='HTML', reply_markup=None)
                 logger.info(f"Статья {article.id} успешно опубликована.")
             elif action == "reject":

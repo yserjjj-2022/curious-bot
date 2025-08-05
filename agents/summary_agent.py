@@ -1,4 +1,3 @@
-# Файл: agents/summary_agent.py
 # -*- coding: utf-8 -*-
 
 import os
@@ -19,7 +18,7 @@ from services.storage_service import StorageService
 from services.giga_service import GigaService
 
 # --- УТИЛИТАРНАЯ ФУНКЦИЯ ---
-# Мы оставляем ее здесь, чтобы другие агенты могли ее импортировать
+# Оставляем ее здесь, так как она импортируется в другом агенте
 def cleanup_text(text: str) -> str:
     """Отсекает "хвост" из ссылок и прочего мусора."""
     if not text:
@@ -37,8 +36,8 @@ def cleanup_text(text: str) -> str:
     return text
 
 def run_summary_cycle():
-    """Основной цикл работы "Агента-Суммаризатора"."""
-    print("=== ЗАПУСК АГЕНТА-СУММАРИЗАТОРА (Финальная версия) ===")
+    """Основной цикл работы "Агента-Суммаризатора" (с учетом темы)."""
+    print("=== ЗАПУСК АГЕНТА-СУММАРИЗАТОРА (Контекстуальная версия) ===")
     storage = StorageService()
     giga = GigaService()
 
@@ -66,10 +65,14 @@ def run_summary_cycle():
         article = articles[0]
         print(f"\n-> Обрабатываю статью: {article.title[:60]} (Статус: {article.status})")
         
+        # Извлекаем тему из статьи для подстановки в промпт
+        theme = article.theme_name or "Общие финансы"
+        print(f"   Тема для суммаризации: '{theme}'")
+        
+        # Выбираем правильный промпт и текст в зависимости от статуса
         if article.status == 'awaiting_full_summary':
             prompt_template = full_summary_prompt
-            # Просто берем текст, он УЖЕ должен быть очищен Экстрактором
-            text_to_process = article.full_text
+            text_to_process = article.full_text # Текст уже должен быть очищен Экстрактором
             print("   Выбран конвейер: Полный текст.")
         else: # awaiting_abstract_summary
             prompt_template = abstract_summary_prompt
@@ -80,10 +83,14 @@ def run_summary_cycle():
             print("  -> Текст отсутствует или слишком короткий. Пропускаю.")
             storage.update_article_status(article.id, 'summary_failed_no_text')
             continue
-
-        final_prompt = prompt_template.format(article_text=text_to_process[:20000])
         
-        print("   Отправляю запрос в GigaChat...")
+        # Подставляем в промпт и текст статьи, и ее тему
+        final_prompt = prompt_template.format(
+            article_text=text_to_process[:20000],
+            theme_name=theme 
+        )
+        
+        print("   Отправляю контекстуальный промпт в GigaChat...")
         summary = giga.get_completion(final_prompt)
 
         if summary:
