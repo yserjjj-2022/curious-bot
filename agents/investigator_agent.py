@@ -1,4 +1,3 @@
-# Файл: agents/investigator_agent.py
 # -*- coding: utf-8 -*-
 
 import sys
@@ -15,27 +14,23 @@ from dotenv import load_dotenv
 dotenv_path = project_root / '.env'
 load_dotenv(dotenv_path=dotenv_path)
 
-# --- Используем ТОЛЬКО официальный Playwright ---
+# --- Используем Playwright ---
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
 from services.storage_service import StorageService
 
 def find_pdf_link_with_browser(page_url: str) -> str | None:
     """
-    Заходит на страницу, используя стандартный Playwright с аргументами для маскировки.
+    Заходит на страницу, используя Playwright, и ищет ссылку на PDF.
     """
     with sync_playwright() as p:
         browser = None
         try:
-            launch_args = [
-                '--disable-blink-features=AutomationControlled',
-                '--start-maximized',
-            ]
+            launch_args = ['--disable-blink-features=AutomationControlled']
             browser = p.chromium.launch(headless=True, args=launch_args)
             
             context = browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                viewport={'width': 1920, 'height': 1080},
             )
             page = context.new_page()
             
@@ -45,8 +40,10 @@ def find_pdf_link_with_browser(page_url: str) -> str | None:
 
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            pdf_links = soup.find_all('a', href=re.compile(r'\.pdf', re.I))
+            # Ищем ссылки, которые явно ведут на .pdf
+            pdf_links = soup.find_all('a', href=re.compile(r'\.pdf$', re.I))
             if not pdf_links:
+                # Если не нашли, ищем по тексту ссылки
                 pdf_links = soup.find_all('a', string=re.compile(r'.*(pdf|download|full.?text).*', re.I))
 
             for link in pdf_links:
@@ -65,49 +62,61 @@ def find_pdf_link_with_browser(page_url: str) -> str | None:
             if browser:
                 browser.close()
 
-def run_investigation():
+# --- НОВАЯ ГЛАВНАЯ ФУНКЦИЯ ДЛЯ ОРКЕСТРАТОРА ---
+def run_investigation_cycle(storage: StorageService):
     """
-    Основной цикл работы "Агента-Следователя", который теперь
-    ПРАВИЛЬНО меняет статус статьи с 'new' на 'investigated'.
+    Запускается "Дирижером", обрабатывает ВСЕ доступные статьи со статусом 'new'
+    и завершает свою работу.
     """
-    print("=== ЗАПУСК АГЕНТА-СЛЕДОВАТЕЛЯ (Финальная, синхронизированная версия) ===")
-    storage = StorageService()
+    print("=== ЗАПУСК АГЕНТА-РАССЛЕДОВАТЕЛЯ ===")
+    # storage = StorageService()
     
-    articles_to_investigate = storage.get_articles_by_status('new', limit=10)
-    upgraded_count = 0
-    processed_count = 0
-    print(f"Найдено {len(articles_to_investigate)} новых статей для расследования...")
+    # Берем все статьи 'new' за один раз
+    articles_to_investigate = storage.get_articles_by_status('new', limit=1000)
+    
+    if not articles_to_investigate:
+        print("...статей для расследования не найдено.")
+        print("=== РАБОТА АГЕНТА-РАССЛЕДОВАТЕЛЯ ЗАВЕРШЕНА ===")
+        return
 
+    print(f"Найдено {len(articles_to_investigate)} новых статей для расследования. Начинаю обработку...")
+    upgraded_count = 0
+    
     for i, article in enumerate(articles_to_investigate):
+        print(f"\n[{i+1}/{len(articles_to_investigate)}] Расследую: {article.title[:50]}...")
+        
         url_to_check = article.doi
-        new_status = 'investigated'
+        new_status = 'investigated' # По умолчанию считаем, что расследование прошло
         
         if not url_to_check:
-            print(f"[{i+1}/{len(articles_to_investigate)}] Пропускаю: {article.title[:40]}... (Причина: нет DOI)")
-            new_status = 'investigated_no_link'
+            print("  -> Пропускаю: нет DOI для проверки.")
+            # Статус 'investigated' все равно ставим, чтобы статья пошла дальше по конвейеру
+            # и обработалась на основе аннотации.
         else:
-            print(f"\n[{i+1}/{len(articles_to_investigate)}] Расследую: {article.title[:50]}... (DOI: {url_to_check})")
-            
+            print(f"   Проверяю DOI: {url_to_check}")
             pdf_link = find_pdf_link_with_browser(url_to_check)
             
             if pdf_link:
-                print(f"  ✅ НАЙДЕН PDF: {pdf_link}")
+                print(f"  ✅ НАЙДЕН PDF: {pdf_link[:80]}...")
                 storage.update_article_content(article.id, 'pdf', pdf_link)
                 upgraded_count += 1
             else:
-                print("  -> PDF не найден на странице.")
+                print("  -> PDF не найден на странице DOI.")
 
         storage.update_article_status(article.id, new_status)
-        processed_count += 1
-        print(f"   -> Статья {article.id} обработана. Новый статус: '{new_status}'.")
+        print(f"   -> Статья обработана. Новый статус: '{new_status}'.")
 
-        sleep_time = random.uniform(5, 10)
+        sleep_time = random.uniform(3, 7)
         print(f"   ...пауза на {sleep_time:.1f} секунд...")
         time.sleep(sleep_time)
             
     print(f"\n=== РАССЛЕДОВАНИЕ ЗАВЕРШЕНО ===")
-    print(f"Всего обработано статей: {processed_count}")
-    print(f"Из них 'прокачано' до PDF: {upgraded_count}")
+    print(f"Всего обработано статей: {len(articles_to_investigate)}")
+    print(f"Из них найдена прямая ссылка на PDF: {upgraded_count}")
+
 
 if __name__ == "__main__":
-    run_investigation()
+    # Для ручного запуска создаем собственный экземпляр StorageService
+    print("--- Запуск Расследователя в режиме ручной отладки ---")
+    storage_instance = StorageService()
+    run_investigation_cycle(storage_instance)

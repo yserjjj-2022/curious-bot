@@ -10,11 +10,13 @@ document_types:
 context_keywords:
   - "behavioral finance"
   - "behavioral economics"
-  - "financial behavior"
-  - "financial psychology"
+  - "behavioral insights"
 
 aspect_keywords:
-  - "financial regulation"
-  - "nudge"
-  - "financial policy"
-
+  - "OECD"
+  - "CFPB"
+  - "Bank of Russia"
+  - "World Bank"
+  - "Federal Reserve"
+  - "BI Unit"
+  - "Nudge Unit"

@@ -10,3 +10,4 @@ beautifulsoup4
 playwright
 PyMuPDF
 readability-lxml
+apscheduler

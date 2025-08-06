@@ -18,7 +18,6 @@ from services.storage_service import StorageService
 from services.giga_service import GigaService
 
 # --- УТИЛИТАРНАЯ ФУНКЦИЯ ---
-# Оставляем ее здесь, так как она импортируется в другом агенте
 def cleanup_text(text: str) -> str:
     """Отсекает "хвост" из ссылок и прочего мусора."""
     if not text:
@@ -35,62 +34,60 @@ def cleanup_text(text: str) -> str:
         return text[:match.start()]
     return text
 
-def run_summary_cycle():
-    """Основной цикл работы "Агента-Суммаризатора" (с учетом темы)."""
-    print("=== ЗАПУСК АГЕНТА-СУММАРИЗАТОРА (Контекстуальная версия) ===")
-    storage = StorageService()
+# --- НОВАЯ ГЛАВНАЯ ФУНКЦИЯ ДЛЯ ОРКЕСТРАТОРА ---
+def run_summary_cycle(storage: StorageService):
+    """
+    Запускается "Дирижером", обрабатывает ВСЕ статьи, ожидающие суммаризации,
+    и завершает свою работу.
+    """
+    print("=== ЗАПУСК АГЕНТА-СУММАРИЗАТОРА ===")
+    # storage = StorageService()
     giga = GigaService()
 
+    # Загружаем шаблоны промптов
     prompt_dir = project_root / 'prompts'
     try:
         with open(prompt_dir / 'summary_news_style_prompt.txt', 'r', encoding='utf-8') as f:
             full_summary_prompt = f.read()
         with open(prompt_dir / 'summary_abstract_style_prompt.txt', 'r', encoding='utf-8') as f:
             abstract_summary_prompt = f.read()
-        print("Шаблоны промптов для обоих конвейеров успешно загружены.")
     except FileNotFoundError as e:
         print(f"КРИТИЧЕСКАЯ ОШИБКА: Не найден файл с промптом: {e}")
-        sys.exit(1)
+        return
     
-    while True:
-        print("\nИщу статьи для суммаризации...")
-        statuses_to_find = ['awaiting_full_summary', 'awaiting_abstract_summary']
-        articles = storage.get_articles_by_status(statuses_to_find, limit=1)
+    statuses_to_find = ['awaiting_full_summary', 'awaiting_abstract_summary']
+    articles_to_process = storage.get_articles_by_status(statuses_to_find, limit=1000)
         
-        if not articles:
-            print("...статей для обработки не найдено. Пауза 60 секунд.")
-            time.sleep(60)
-            continue
+    if not articles_to_process:
+        print("...статей для суммаризации не найдено.")
+        print("=== РАБОТА АГЕНТА-СУММАРИЗАТОРА ЗАВЕРШЕНА ===")
+        return
 
-        article = articles[0]
-        print(f"\n-> Обрабатываю статью: {article.title[:60]} (Статус: {article.status})")
+    print(f"Найдено {len(articles_to_process)} статей для суммаризации. Начинаю обработку...")
+
+    for article in articles_to_process:
+        print(f"\n-> Обрабатываю статью: {article.title[:60]}... (Статус: {article.status})")
         
-        # Извлекаем тему из статьи для подстановки в промпт
         theme = article.theme_name or "Общие финансы"
-        print(f"   Тема для суммаризации: '{theme}'")
         
-        # Выбираем правильный промпт и текст в зависимости от статуса
         if article.status == 'awaiting_full_summary':
             prompt_template = full_summary_prompt
-            text_to_process = article.full_text # Текст уже должен быть очищен Экстрактором
-            print("   Выбран конвейер: Полный текст.")
+            text_to_process = article.full_text
         else: # awaiting_abstract_summary
             prompt_template = abstract_summary_prompt
             text_to_process = article.original_abstract
-            print("   Выбран конвейер: Аннотация.")
 
         if not text_to_process or len(text_to_process) < 50:
             print("  -> Текст отсутствует или слишком короткий. Пропускаю.")
             storage.update_article_status(article.id, 'summary_failed_no_text')
             continue
         
-        # Подставляем в промпт и текст статьи, и ее тему
         final_prompt = prompt_template.format(
             article_text=text_to_process[:20000],
             theme_name=theme 
         )
         
-        print("   Отправляю контекстуальный промпт в GigaChat...")
+        print(f"   Отправляю промпт в GigaChat (Тема: '{theme}')...")
         summary = giga.get_completion(final_prompt)
 
         if summary:
@@ -101,9 +98,13 @@ def run_summary_cycle():
         else:
             print("  -> Не удалось получить выжимку от GigaChat.")
             storage.update_article_status(article.id, 'summary_failed_api_error')
-        
-        print("\nЦикл суммаризации завершен. Пауза 30 секунд...")
-        time.sleep(30)
+    
+    print(f"\nОбработано {len(articles_to_process)} статей.")
+    print("=== РАБОТА АГЕНТА-СУММАРИЗАТОРА ЗАВЕРШЕНА ===")
+
 
 if __name__ == "__main__":
-    run_summary_cycle()
+    # Для ручного запуска создаем собственный экземпляр StorageService
+    print("--- Запуск Суммаризатора в режиме ручной отладки ---")
+    storage_instance = StorageService()
+    run_summary_cycle(storage_instance)

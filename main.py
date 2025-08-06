@@ -17,12 +17,17 @@ load_dotenv(dotenv_path=dotenv_path)
 from services.openalex_fetcher import OpenAlexFetcher
 from services.storage_service import StorageService
 
-def run_collection_cycle():
-    """Основной цикл работы "Агента-Сборщика"."""
+def run_collection_cycle(storage: StorageService, initial_load: bool = False, limit_per_theme: int = 50):
+    """
+    Основной цикл работы "Агента-Сборщика".
+    Может работать в двух режимах:
+    - Обычный: собирает последние статьи согласно настройкам в yaml.
+    - Первоначальная заливка (initial_load=True): игнорирует год в yaml и загружает все с 2025.
+    """
     print("=== ЗАПУСК ЦИКЛА СБОРА ДАННЫХ (АГЕНТ-СБОРЩИК) ===")
     
     fetcher = OpenAlexFetcher()
-    storage = StorageService()
+    # storage = StorageService()
     print("Сервисы Fetcher и Storage инициализированы.")
     
     source_files = sorted([f for f in os.listdir('sources') if f.endswith('.yaml')])
@@ -35,7 +40,17 @@ def run_collection_cycle():
             with open(f"sources/{source_file}", 'r', encoding='utf-8') as f:
                 slice_config = yaml.safe_load(f)
 
-            # Извлекаем "человеческое" имя темы из файла
+            # --- ГЛАВНАЯ ЛОГИКА ОРКЕСТРАЦИИ ---
+            # Динамически устанавливаем лимит и, если нужно, год публикации
+            slice_config['fetch_limit'] = limit_per_theme
+            
+            if initial_load:
+                slice_config['publication_year'] = '>=2025'
+                print(f"   [Режим первоначальной заливки] -> Ищем статьи с 2025 года. Лимит: {limit_per_theme}.")
+            else:
+                print(f"   [Обычный режим] -> Настройки поиска взяты из файла. Лимит: {limit_per_theme}.")
+            # ------------------------------------
+
             theme_name_from_file = slice_config.get("theme_name", "Без темы")
             print(f"Тематический срез: '{theme_name_from_file}'")
 
@@ -46,7 +61,7 @@ def run_collection_cycle():
                 print("   -> Для данного среза не найдено новых статей, готовых к добавлению.")
                 continue
 
-            # Преобразуем "сырые" данные под нашу модель в базе данных
+            # Преобразуем и сохраняем данные
             added_count = 0
             for raw_article in raw_articles:
                 article_data_to_store = {
@@ -61,13 +76,10 @@ def run_collection_cycle():
                     'type': raw_article.get('type'),
                     'language': raw_article.get('language'),
                     'original_abstract': raw_article.get('abstract'),
-                    # Передаем наш тег (имя темы) в базу
                     'theme_name': theme_name_from_file,
-                    # Сохраняем все "сырые" метаданные как строку JSON для будущих нужд
                     'full_metadata': json.dumps(raw_article) 
                 }
                 
-                # Используем правильное имя аргумента `article_data`
                 if storage.add_article(article_data=article_data_to_store):
                     added_count += 1
             
@@ -79,4 +91,8 @@ def run_collection_cycle():
     print("\n=== ЦИКЛ СБОРА ДАННЫХ ЗАВЕРШЕН ===")
 
 if __name__ == '__main__':
-    run_collection_cycle()
+    # Для ручного запуска создаем собственный экземпляр StorageService
+    print("--- Запуск Сборщика в режиме ручной отладки ---")
+    storage_instance = StorageService()
+    # Пример: запускаем обычный цикл сбора с лимитом 10 статей на тему
+    run_collection_cycle(storage_instance, initial_load=False, limit_per_theme=10)
