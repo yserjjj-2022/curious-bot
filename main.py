@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# main.py (полностью обновленная версия)
 
 import os
 import sys
@@ -13,21 +13,23 @@ from dotenv import load_dotenv
 dotenv_path = project_root / '.env'
 load_dotenv(dotenv_path=dotenv_path)
 
-# --- Правильные импорты наших сервисов ---
+# --- ИЗМЕНЕНО: Импортируем оба наших фетчера ---
 from services.openalex_fetcher import OpenAlexFetcher
+from services.arxiv_fetcher import ArxivFetcher # <-- НОВЫЙ ИМПОРТ
 from services.storage_service import StorageService
 
 def run_collection_cycle(storage: StorageService, initial_load: bool = False, limit_per_theme: int = 50):
     """
     Основной цикл работы "Агента-Сборщика".
-    Может работать в двух режимах:
-    - Обычный: собирает последние статьи согласно настройкам в yaml.
-    - Первоначальная заливка (initial_load=True): игнорирует год в yaml и загружает все с 2025.
+    Теперь может работать с разными источниками (OpenAlex, arXiv).
     """
     print("=== ЗАПУСК ЦИКЛА СБОРА ДАННЫХ (АГЕНТ-СБОРЩИК) ===")
     
-    fetcher = OpenAlexFetcher()
-    # storage = StorageService()
+    # --- ИЗМЕНЕНО: Создаем экземпляры всех доступных фетчеров ---
+    fetchers = {
+        'openalex': OpenAlexFetcher(),
+        'arxiv': ArxivFetcher()
+    }
     print("Сервисы Fetcher и Storage инициализированы.")
     
     source_files = sorted([f for f in os.listdir('sources') if f.endswith('.yaml')])
@@ -36,63 +38,54 @@ def run_collection_cycle(storage: StorageService, initial_load: bool = False, li
     for source_file in source_files:
         print(f"\n--- Обрабатываю срез: {source_file} ---")
         try:
-            # Загружаем конфигурацию среза
             with open(f"sources/{source_file}", 'r', encoding='utf-8') as f:
                 slice_config = yaml.safe_load(f)
 
-            # --- ГЛАВНАЯ ЛОГИКА ОРКЕСТРАЦИИ ---
-            # Динамически устанавливаем лимит и, если нужно, год публикации
+            # --- ИЗМЕНЕНО: Определяем, какой фетчер использовать ---
+            source_type = slice_config.get('source_type', 'openalex').lower()
+            fetcher = fetchers.get(source_type)
+            
+            if not fetcher:
+                print(f"   ❌ Неизвестный тип источника '{source_type}'. Пропускаю.")
+                continue
+
             slice_config['fetch_limit'] = limit_per_theme
             
-            if initial_load:
+            # Логика для первоначальной заливки (применима только к OpenAlex)
+            if initial_load and source_type == 'openalex':
                 slice_config['publication_year'] = '>=2025'
-                print(f"   [Режим первоначальной заливки] -> Ищем статьи с 2025 года. Лимит: {limit_per_theme}.")
-            else:
-                print(f"   [Обычный режим] -> Настройки поиска взяты из файла. Лимит: {limit_per_theme}.")
-            # ------------------------------------
+                print(f"   [Режим первоначальной заливки] -> Ищем статьи с 2025 года.")
 
             theme_name_from_file = slice_config.get("theme_name", "Без темы")
-            print(f"Тематический срез: '{theme_name_from_file}'")
+            print(f"Тематический срез: '{theme_name_from_file}' (Источник: {source_type.upper()})")
 
-            # Получаем "сырые" данные от фетчера
+            # Получаем "сырые" данные от выбранного фетчера
             raw_articles = fetcher.fetch_articles(slice_config)
             
             if not raw_articles:
                 print("   -> Для данного среза не найдено новых статей, готовых к добавлению.")
                 continue
 
-            # Преобразуем и сохраняем данные
             added_count = 0
+            enriched_count = 0
             for raw_article in raw_articles:
-                article_data_to_store = {
-                    'id': raw_article.get('id'),
-                    'title': raw_article.get('display_name'),
-                    'source_name': 'OpenAlex',
-                    'status': 'new',
-                    'content_type': raw_article.get('content_type'),
-                    'content_url': raw_article.get('content_url'),
-                    'doi': raw_article.get('doi'),
-                    'year': raw_article.get('publication_year'),
-                    'type': raw_article.get('type'),
-                    'language': raw_article.get('language'),
-                    'original_abstract': raw_article.get('abstract'),
-                    'theme_name': theme_name_from_file,
-                    'full_metadata': json.dumps(raw_article) 
-                }
-                
-                if storage.add_article(article_data=article_data_to_store):
+                # --- ИЗМЕНЕНО: Адаптируем маппинг данных ---
+                # Теперь `add_article` сама разберется, что делать
+                result = storage.add_article(article_data=raw_article, theme_name=theme_name_from_file)
+                if result == "added":
                     added_count += 1
+                elif result == "enriched":
+                    enriched_count += 1
             
-            print(f"  ✅ Успешно добавлено {added_count} новых статей в базу по теме '{theme_name_from_file}'.")
+            print(f"  ✅ По теме '{theme_name_from_file}': добавлено {added_count} новых статей, обогащено {enriched_count}.")
 
         except Exception as e:
             print(f"❌ Ошибка при обработке файла {source_file}: {e}")
 
     print("\n=== ЦИКЛ СБОРА ДАННЫХ ЗАВЕРШЕН ===")
 
+
 if __name__ == '__main__':
-    # Для ручного запуска создаем собственный экземпляр StorageService
     print("--- Запуск Сборщика в режиме ручной отладки ---")
     storage_instance = StorageService()
-    # Пример: запускаем обычный цикл сбора с лимитом 10 статей на тему
     run_collection_cycle(storage_instance, initial_load=False, limit_per_theme=10)

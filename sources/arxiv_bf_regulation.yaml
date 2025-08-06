@@ -1,0 +1,6 @@
+source_type: arxiv
+theme_name: "Регуляторные практики"
+query: >-
+  (cat:q-fin.GN OR cat:econ.GN)
+  AND
+  (abs:"behavioral economics" OR abs:"behavioral finance" OR abs:"nudge unit")

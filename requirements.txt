@@ -11,3 +11,4 @@ playwright
 PyMuPDF
 readability-lxml
 apscheduler
+arxiv

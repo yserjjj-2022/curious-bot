@@ -1,0 +1,6 @@
+source_type: arxiv
+theme_name: "Инвестирование"
+query: >-
+  (cat:q-fin.PM OR cat:q-fin.TR OR cat:q-fin.ST)
+  AND
+  (abs:"behavioral finance" OR abs:"prospect theory" OR abs:"cognitive bias" OR abs:herding OR abs:"market sentiment")

@@ -1,0 +1,6 @@
+source_type: arxiv
+theme_name: "Финансовая грамотность и благополучие"
+query: >-
+  (cat:q-fin.GN OR cat:econ.GN)
+  AND
+  (abs:"behavioral finance" OR abs:"financial behavior" OR abs:"cognitive bias" OR abs:"financial psychology")

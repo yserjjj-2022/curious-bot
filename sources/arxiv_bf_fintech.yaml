@@ -1,0 +1,6 @@
+source_type: arxiv
+theme_name: "AI и финтех"
+query: >-
+  (cat:cs.AI OR cat:cs.LG OR cat:q-fin.CP)
+  AND
+  (abs:"behavioral finance" OR abs:"financial psychology" OR abs:sentiment OR abs:"decision making")

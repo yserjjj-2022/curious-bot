@@ -1,0 +1,7 @@
+source_type: arxiv
+theme_name: "Сбережения и пенсии"
+query: >-
+  (cat:q-fin.PM OR cat:q-fin.GN)
+  AND
+  (abs:"behavioral economics" OR abs:"mental accounting" OR abs:nudge OR abs:"hyperbolic discounting")
+
