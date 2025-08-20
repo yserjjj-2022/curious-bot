@@ -1,110 +1,69 @@
-# -*- coding: utf-8 -*-
+# agents/summary_agent.py
 
 import os
 import sys
-import time
-import re
 from pathlib import Path
 
 # --- Блок инициализации ---
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 from dotenv import load_dotenv
-dotenv_path = project_root / '.env'
-load_dotenv(dotenv_path=dotenv_path)
+load_dotenv()
 
-# --- Импорты наших модулей ---
+# --- ИЗМЕНЕНИЕ: Импортируем АГРЕССИВНУЮ функцию очистки ---
 from services.storage_service import StorageService
-from services.giga_service import GigaService
+from services.summarization_service import AdvancedSummarizer
+from services.text_utils import cleanup_summary_text
 
-# --- УТИЛИТАРНАЯ ФУНКЦИЯ ---
-def cleanup_text(text: str) -> str:
-    """Отсекает "хвост" из ссылок и прочего мусора."""
-    if not text:
-        return ""
-    stop_words = [
-        'References', 'Bibliography', 'Data availability statement',
-        'Ethics statement', 'Author contributions', 'Funding',
-        'Conflict of interest', 'Supplementary material', 'Publisher’s note'
-    ]
-    pattern = re.compile(r'\b(' + '|'.join(stop_words) + r')\b', re.IGNORECASE)
-    match = pattern.search(text)
-    
-    if match:
-        return text[:match.start()]
-    return text
+# --- Настройки из .env ---
+SUMMARY_BATCH_SIZE = int(os.getenv("SUMMARY_BATCH_SIZE", 30))
 
-# --- НОВАЯ ГЛАВНАЯ ФУНКЦИЯ ДЛЯ ОРКЕСТРАТОРА ---
 def run_summary_cycle(storage: StorageService):
     """
-    Запускается "Дирижером", обрабатывает ВСЕ статьи, ожидающие суммаризации,
-    и завершает свою работу.
+    Основной цикл агента-суммаризатора.
     """
-    print("=== ЗАПУСК АГЕНТА-СУММАРИЗАТОРА ===")
-    # storage = StorageService()
-    giga = GigaService()
-
-    # Загружаем шаблоны промптов
+    print(f"=== ЗАПУСК АГЕНТА-СУММАРИЗАТОРА (v-final-3-step-editor) ===")
+    summarizer = AdvancedSummarizer()
     prompt_dir = project_root / 'prompts'
     try:
-        with open(prompt_dir / 'summary_news_style_prompt.txt', 'r', encoding='utf-8') as f:
-            full_summary_prompt = f.read()
-        with open(prompt_dir / 'summary_abstract_style_prompt.txt', 'r', encoding='utf-8') as f:
-            abstract_summary_prompt = f.read()
+        with open(prompt_dir / 'summary_abstract_style_prompt.txt', 'r', encoding='utf-8') as f: abstract_prompt = f.read()
+        with open(prompt_dir / 'step1_extraction_prompt.txt', 'r', encoding='utf-8') as f: extraction_prompt = f.read()
+        with open(prompt_dir / 'step2_synthesis_prompt.txt', 'r', encoding='utf-8') as f: synthesis_prompt = f.read()
+        with open(prompt_dir / 'step3_refinement_prompt.txt', 'r', encoding='utf-8') as f: refinement_prompt = f.read()
     except FileNotFoundError as e:
-        print(f"КРИТИЧЕСКАЯ ОШИБКА: Не найден файл с промптом: {e}")
-        return
+        print(f"КРИТИЧЕСКАЯ ОШИБКА: {e}"); return
     
     statuses_to_find = ['awaiting_full_summary', 'awaiting_abstract_summary']
-    articles_to_process = storage.get_articles_by_status(statuses_to_find, limit=1000)
-        
-    if not articles_to_process:
-        print("...статей для суммаризации не найдено.")
-        print("=== РАБОТА АГЕНТА-СУММАРИЗАТОРА ЗАВЕРШЕНА ===")
-        return
+    articles = storage.get_articles_by_status(statuses_to_find, limit=SUMMARY_BATCH_SIZE)
+    if not articles: print("...статей для суммаризации не найдено."); return
+    print(f"Найдено {len(articles)} статей для суммаризации...")
 
-    print(f"Найдено {len(articles_to_process)} статей для суммаризации. Начинаю обработку...")
-
-    for article in articles_to_process:
-        print(f"\n-> Обрабатываю статью: {article.title[:60]}... (Статус: {article.status})")
-        
+    for article in articles:
+        print(f"\\n-> Обрабатываю: {article.title[:60]}...")
+        storage.update_article_status(article.id, 'summary_in_progress')
         theme = article.theme_name or "Общие финансы"
+        summary = None
         
-        if article.status == 'awaiting_full_summary':
-            prompt_template = full_summary_prompt
-            text_to_process = article.full_text
-        else: # awaiting_abstract_summary
-            prompt_template = abstract_summary_prompt
-            text_to_process = article.original_abstract
-
-        if not text_to_process or len(text_to_process) < 50:
-            print("  -> Текст отсутствует или слишком короткий. Пропускаю.")
-            storage.update_article_status(article.id, 'summary_failed_no_text')
-            continue
+        if article.status == 'awaiting_full_summary' and article.full_text:
+            summary = summarizer.summarize_full_text(
+                article.full_text, extraction_prompt, synthesis_prompt, refinement_prompt
+            )
+        elif article.status == 'awaiting_abstract_summary' and article.original_abstract:
+            summary = summarizer.summarize_abstract(article.original_abstract, abstract_prompt, theme)
         
-        final_prompt = prompt_template.format(
-            article_text=text_to_process[:20000],
-            theme_name=theme 
-        )
-        
-        print(f"   Отправляю промпт в GigaChat (Тема: '{theme}')...")
-        summary = giga.get_completion(final_prompt)
-
         if summary:
-            print(f"  ✅ Получена выжимка длиной {len(summary)} символов.")
-            storage.update_article_summary(article.id, summary)
-            storage.update_article_status(article.id, 'awaiting_review')
-            print(f"   -> Выжимка сохранена. Статус изменен на 'awaiting_review'.")
+            # --- ИЗМЕНЕНИЕ: Используем АГРЕССИВНУЮ функцию очистки ---
+            cleaned_summary = cleanup_summary_text(summary)
+            print(f"  ✅ Получена выжимка длиной {len(cleaned_summary)} символов.")
+            storage.update_article_summary(article.id, cleaned_summary)
+            storage.update_article_status(article.id, 'summarized')
         else:
-            print("  -> Не удалось получить выжимку от GigaChat.")
-            storage.update_article_status(article.id, 'summary_failed_api_error')
+            print("  ❌ Не удалось получить выжимку.")
+            storage.update_article_status(article.id, 'summary_failed')
     
-    print(f"\nОбработано {len(articles_to_process)} статей.")
-    print("=== РАБОТА АГЕНТА-СУММАРИЗАТОРА ЗАВЕРШЕНА ===")
-
+    print("\n=== РАБОТА АГЕНТА-СУММАРИЗАТОРА ЗАВЕРШЕНА ===")
 
 if __name__ == "__main__":
-    # Для ручного запуска создаем собственный экземпляр StorageService
-    print("--- Запуск Суммаризатора в режиме ручной отладки ---")
     storage_instance = StorageService()
     run_summary_cycle(storage_instance)
+

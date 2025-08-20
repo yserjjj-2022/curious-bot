@@ -1,5 +1,7 @@
 source_type: arxiv
 theme_name: "Регуляторные практики"
+# Новый, необязательный параметр. Если его нет, по умолчанию будет 2.
+max_age_years: 2 
 query: >-
   (cat:q-fin.GN OR cat:econ.GN)
   AND

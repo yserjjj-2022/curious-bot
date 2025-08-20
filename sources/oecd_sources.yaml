@@ -1,0 +1,20 @@
+# sources/oecd_sources.yaml
+
+datasets:
+  - id: "FIN_ED_LIT" # Изменен на рабочий ID
+    name: "Финансовая грамотность и образование"
+    # --- ИЗМЕНЕНИЕ: Указан правильный, короткий flowRef ---
+    flowRef: "FIN_ED_LIT"
+    startYear: 2023 # Оставляем реальный год для теста
+
+  - id: "CCI" # Consumer Confidence Index
+    name: "Потребительская уверенность"
+    # --- ИЗМЕНЕНИЕ: Указан правильный, короткий flowRef ---
+    flowRef: "CCI"
+    startYear: 2023
+
+  - id: "HH_SAV" # Household Saving
+    name: "Сбережения домохозяйств"
+    # --- ИЗМЕНЕНИЕ: Указан правильный, короткий flowRef ---
+    flowRef: "HH_SAV"
+    startYear: 2023

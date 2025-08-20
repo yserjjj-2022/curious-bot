@@ -1,5 +1,7 @@
 source_type: arxiv
 theme_name: "AI и финтех"
+# Новый, необязательный параметр. Если его нет, по умолчанию будет 2.
+max_age_years: 2 
 query: >-
   (cat:cs.AI OR cat:cs.LG OR cat:q-fin.CP)
   AND

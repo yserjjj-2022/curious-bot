@@ -1,74 +1,39 @@
-# -*- coding: utf-8 -*-
-
+# services/summarization_service.py
 import os
 from gigachat import GigaChat
 from gigachat.models import Chat
 from typing import Optional
 
-class GigaChatSummarizer:
-    """
-    Сервис для создания качественной, стилизованной выжимки из текста с использованием API GigaChat.
-    """
+class AdvancedSummarizer:
     def __init__(self):
         credentials = os.getenv('GIGACHAT_CREDENTIALS')
-        if not credentials:
-            raise ValueError("Не найден GIGACHAT_CREDENTIALS в переменных окружения!")
+        if not credentials: raise ValueError("Не найден GIGACHAT_CREDENTIALS")
         self.giga = GigaChat(credentials=credentials, verify_ssl_certs=False)
 
-    def summarize_abstract(self, abstract: str) -> Optional[str]:
-        """
-        Создает качественную, стилизованную выжимку из аннотации статьи.
-        """
-        if not abstract or not isinstance(abstract, str) or len(abstract.strip()) < 50:
-            print("   -> Аннотация слишком короткая или отсутствует, суммаризация пропущена.")
-            return None
-
-        # --- НАШ ФИНАЛЬНЫЙ, СТИЛИСТИЧЕСКИ ВЫВЕРЕННЫЙ ПРОМПТ ---
-        
-        system_prompt = (
-            "Ты — научный редактор, который пишет краткие дайджесты для занятых аналитиков. "
-            "Твоя задача — превратить сухую научную аннотацию в живой и понятный текст на русском языке, "
-            "сохраняя при этом все ключевые факты."
-        )
-
-        style_example = (
-            "Пример желаемого стиля и структуры:\n"
-            "\"\"\"\n"
-            "Исследователи из MIT сравнили поведение 10 человек и трех моделей ИИ... В половине случаев одна из опций была помечена как «выбор по умолчанию».\n"
-            "Обнаружено, что все протестированные модели ИИ оказались гораздо более восприимчивы к подталкиванию... Предположено, что причиной такого поведения является стремление модели «соглашаться»...\n"
-            "Вывод: искусственный интеллект лишь кажется похожим на человека..."
-            "\"\"\""
-        )
-
-        user_prompt = (
-            "Сделай краткую выжимку следующей аннотации в виде связного текста (1-2 абзаца). "
-            "Не используй нумерованные или маркированные списки.\n\n"
-            # --- ВАШЕ УЛУЧШЕНИЕ: Новое, явное стилистическое правило ---
-            "ВАЖНОЕ ПРАВИЛО СТИЛЯ: Избегай конструкций, где неодушевленный предмет совершает действие (например, 'исследование проанализировало'). "
-            "Вместо этого используй активный залог ('ученые выяснили', 'авторы пришли к выводу') или безличные формы ('в работе показано', 'было обнаружено').\n\n"
-            # -------------------------------------------------------------
-            f"Обязательно придерживайся стиля и структуры, как в приведенном примере. В тексте последовательно раскрой ключевую проблему, метод исследования (включая страну и выборку, если они есть) и основной вывод.\n\n"
-            f"{style_example}\n\n"
-            f"Теперь обработай эту аннотацию:\n"
-            f"\"\"\"\n{abstract}\n\"\"\""
-        )
-
+    def _get_completion(self, prompt: str, temp: float, tokens: int) -> Optional[str]:
         try:
-            print("   -> Отправка запроса в GigaChat API для стилизованной суммаризации...")
-            
-            payload = Chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.6,
-                max_tokens=350,
-            )
-            response = self.giga.chat(payload)
-            
-            summary = response.choices[0].message.content.strip()
-            print("   -> Стилизованная суммаризация успешно получена.")
-            return summary
+            payload = Chat(messages=[{"role": "user", "content": prompt}], temperature=temp, max_tokens=tokens)
+            resp = self.giga.chat(payload)
+            return resp.choices[0].message.content.strip() if resp and resp.choices else None
         except Exception as e:
-            print(f"❌ Ошибка при обращении к GigaChat API: {e}")
-            return None
+            print(f"❌ Ошибка API: {e}"); return None
+
+    def summarize_abstract(self, abstract: str, template: str, theme: str) -> Optional[str]:
+        prompt = template.format(article_text=abstract, theme_name=theme)
+        return self._get_completion(prompt, temp=0.6, tokens=500)
+
+    def summarize_full_text(self, text: str, extraction_template: str, synthesis_template: str, theme: str) -> Optional[str]:
+        """Конвейер: Сборщик фактов -> Журналист."""
+        print("      [Шаг 1/2] Извлечение фактов для журналиста...")
+        p1 = extraction_template.format(article_text=text[:20000])
+        facts = self._get_completion(p1, temp=0.1, tokens=1000)
+        if not facts: 
+            print("      -> Ошибка на шаге 1."); return None
+
+        print("      [Шаг 2/2] Написание новостной заметки...")
+        p2 = synthesis_template.format(extracted_facts=facts)
+        final_summary = self._get_completion(p2, temp=0.7, tokens=800)
+        if not final_summary:
+            print("      -> Ошибка на шаге 2."); return None
+        
+        return final_summary

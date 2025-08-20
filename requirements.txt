@@ -12,3 +12,4 @@ PyMuPDF
 readability-lxml
 apscheduler
 arxiv
+pylatexenc

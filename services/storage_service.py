@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# services/storage_service.py
 
 import os
 from datetime import datetime, timezone
@@ -22,11 +22,15 @@ class Article(Base):
     id = Column(String, primary_key=True)
     title = Column(String, nullable=False)
     normalized_title = Column(String, index=True)
-    source_name = Column(String)
-    status = Column(String, default='new', nullable=False)
+    source_name = Column(String, index=True) # Добавил индекс для ускорения поиска
+    
+    # --- ИЗМЕНЕНИЕ: Добавляем новое ключевое поле ---
+    source_unique_id = Column(String, index=True) # Уникальный ID из источника
+    
+    status = Column(String, default='new', nullable=False, index=True) # Добавил индекс
     content_type = Column(String, nullable=True)
     content_url = Column(String, nullable=True)
-    doi = Column(String, nullable=True)
+    doi = Column(String, nullable=True, index=True) # Добавил индекс
     year = Column(Integer)
     type = Column(String)
     language = Column(String)
@@ -49,83 +53,97 @@ class StorageService:
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
-    # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Внедрена логика "Интеллектуального слияния" ---
     def add_article(self, article_data: dict, theme_name: str) -> str | None:
         """
-        Добавляет статью в базу или интеллектуально сливает ее с существующей.
-        Возвращает "added", "enriched", "skipped" или None.
+        Добавляет или обогащает статью. Приоритет проверки на дубликаты:
+        1. По (source_name, source_unique_id)
+        2. По DOI
+        3. По нормализованному заголовку
         """
         session = self.Session()
         try:
             new_title = article_data.get('title')
-            if not new_title:
-                return "skipped"
+            if not new_title: return "skipped_no_title"
 
-            article_id = article_data.get('id')
-            if article_id and session.query(Article).filter_by(id=article_id).first():
-                return "skipped"
-
+            # --- ИЗМЕНЕНИЕ: Улучшенная логика поиска дубликатов ---
+            existing_article = None
+            source_name = article_data.get('source_name')
+            source_unique_id = article_data.get('source_unique_id')
+            new_doi = article_data.get('doi')
             norm_title = normalize_title(new_title)
-            existing_by_title = session.query(Article).filter_by(normalized_title=norm_title).first()
 
-            if existing_by_title:
-                # --- ЛОГИКА ИНТЕЛЛЕКТУАЛЬНОГО СЛИЯНИЯ ---
+            # 1. Лучший способ: по ID из источника
+            if source_name and source_unique_id:
+                existing_article = session.query(Article).filter_by(
+                    source_name=source_name, 
+                    source_unique_id=source_unique_id
+                ).first()
+
+            # 2. Второй по надежности: по DOI
+            if not existing_article and new_doi:
+                existing_article = session.query(Article).filter_by(doi=new_doi).first()
+
+            # 3. Наименее надежный: по заголовку
+            if not existing_article:
+                existing_article = session.query(Article).filter_by(normalized_title=norm_title).first()
+
+            if existing_article:
+                # --- ЛОГИКА ОБОГАЩЕНИЯ ---
                 is_enriched = False
-
-                # 1. Слияние URL контента (приоритет у PDF)
-                new_url = article_data.get('content_url')
-                if new_url and not existing_by_title.content_url:
-                    existing_by_title.content_url = new_url
+                if not existing_article.content_url and article_data.get('content_url'):
+                    existing_article.content_url = article_data.get('content_url')
                     is_enriched = True
-
-                # 2. Слияние аннотации (выбираем более длинную)
-                existing_abstract = existing_by_title.original_abstract or ""
+                
+                existing_abstract = existing_article.original_abstract or ""
                 new_abstract = article_data.get('original_abstract') or ""
-                if len(new_abstract) > len(existing_abstract) * 1.2: # Если новая на 20% длиннее
-                    existing_by_title.original_abstract = new_abstract
+                if len(new_abstract) > len(existing_abstract):
+                    existing_article.original_abstract = new_abstract
                     is_enriched = True
-
-                # 3. Слияние DOI (добавляем, если не было)
-                new_doi = article_data.get('doi')
-                if new_doi and not existing_by_title.doi:
-                    existing_by_title.doi = new_doi
+                
+                if not existing_article.doi and new_doi:
+                    existing_article.doi = new_doi
+                    is_enriched = True
+                
+                # Добавляем ID источника, если его не было
+                if not existing_article.source_unique_id and source_unique_id:
+                    existing_article.source_unique_id = source_unique_id
                     is_enriched = True
                 
                 if is_enriched:
-                    # Обновляем источник, чтобы показать, что данные были обогащены
-                    existing_by_title.source_name = f"{existing_by_title.source_name}+{article_data.get('source_name', 'UNK')}"
                     session.commit()
                     return "enriched"
                 else:
-                    return "skipped"
+                    return "skipped_duplicate"
             
             # --- Дубликатов нет. Создаем новую статью. ---
-            data_to_store = {
-                'id': article_data.get('id'),
-                'title': new_title,
-                'normalized_title': norm_title,
-                'source_name': article_data.get('source_name'),
-                'status': 'new',
-                'content_url': article_data.get('content_url'),
-                'doi': article_data.get('doi'),
-                'year': article_data.get('year'),
-                'language': article_data.get('language'),
-                'original_abstract': article_data.get('original_abstract'),
-                'theme_name': theme_name,
-                'full_metadata': json.dumps(article_data.get('full_metadata', {}))
-            }
-            new_article = Article(**data_to_store)
+            new_article = Article(
+                id=article_data.get('id'),
+                title=new_title,
+                normalized_title=norm_title,
+                source_name=source_name,
+                source_unique_id=source_unique_id, # Сохраняем ID источника
+                status='new',
+                content_url=article_data.get('content_url'),
+                doi=new_doi,
+                year=article_data.get('year'),
+                language=article_data.get('language'),
+                original_abstract=article_data.get('original_abstract'),
+                theme_name=theme_name,
+                full_metadata=json.dumps(article_data.get('full_metadata', {}))
+            )
             session.add(new_article)
             session.commit()
             return "added"
 
-        except Exception:
+        except Exception as e:
             session.rollback()
+            # Для отладки полезно видеть ошибку
+            print(f"ERROR in add_article: {e}")
             raise
         finally:
             session.close()
 
-    # --- Остальные методы остаются без изменений ---
+    # --- Остальные методы без изменений ---
     def get_articles_by_status(self, status: Union[str, List[str]], limit: int = 10, random_order: bool = False) -> List[Article]:
         session = self.Session()
         try:
@@ -147,8 +165,7 @@ class StorageService:
     def get_article_count_by_status(self, status: str) -> int:
         session = self.Session()
         try:
-            count = session.query(Article).filter_by(status=status).count()
-            return count
+            return session.query(Article).filter_by(status=status).count()
         finally:
             session.close()
 
@@ -219,3 +236,9 @@ class StorageService:
             return False
         finally:
             session.close()
+
+if __name__ == '__main__':
+    # Эта часть нужна для инициализации/пересоздания БД
+    print("Инициализация базы данных...")
+    storage = StorageService()
+    print("База данных готова к работе.")
